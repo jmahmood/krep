@@ -1,0 +1,17 @@
+[package]
+name = "cardio_tray"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+cardio_core = { path = "../cardio_core" }
+gtk4.workspace = true
+libadwaita.workspace = true
+gio.workspace = true
+glib.workspace = true
+libayatana-appindicator.workspace = true
+open.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
