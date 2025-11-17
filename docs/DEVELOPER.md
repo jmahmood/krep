@@ -50,6 +50,15 @@ Integration tests live under `cardio_cli/tests` and `cardio_cli/tests/integratio
 
 Catalog definitions live in `cardio_core/src/catalog.rs`. Keep IDs stable; progression keys and round-robin history rely on `definition.id`.
 
+**For comprehensive instructions on adding exercises, stretches, and movements, see:**
+📖 **[ADDING_EXERCISES.md](ADDING_EXERCISES.md)** - Complete guide covering:
+- Adding movements (simple and with progression)
+- Creating microdose definitions
+- Working with metrics and styles
+- Custom progression algorithms
+- Multi-block workouts
+- Testing and validation
+
 ## Adding Session Types
 
 - Extend `MicrodoseCategory` and catalog entries.

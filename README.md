@@ -231,17 +231,30 @@ cargo test -p cardio_core -- --nocapture
 
 ### Adding Custom Movements
 
-Edit `cardio_core/src/catalog.rs`:
+Krep supports adding new exercises, stretches, and mobility drills. For comprehensive instructions, see:
+
+**📖 [Adding Exercises Guide](docs/ADDING_EXERCISES.md)**
+
+This guide covers:
+- Adding simple movements (mobility drills, stretches)
+- Creating movements with automatic progression
+- Working with metrics and movement styles
+- Multi-block workouts (circuits, complexes)
+- Custom progression algorithms
+- Testing and validation
+
+**Quick Example** - Add a mobility drill:
 
 ```rust
+// In cardio_core/src/catalog.rs
 movements.insert(
-    "jump_rope".into(),
+    "ankle_cars".into(),
     Movement {
-        id: "jump_rope".into(),
-        name: "Jump Rope".into(),
-        kind: MovementKind::Cardio,
+        id: "ankle_cars".into(),
+        name: "Ankle CARs".into(),
+        kind: MovementKind::MobilityDrill,
         default_style: MovementStyle::None,
-        tags: vec!["vo2".into()],
+        tags: vec!["mobility".into(), "ankle".into()],
         reference_url: Some("https://...".into()),
     },
 );
