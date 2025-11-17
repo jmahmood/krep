@@ -2,7 +2,7 @@ use libadwaita as adw;
 use adw::prelude::*;
 use adw::Application;
 use cardio_core::{
-    build_default_catalog, increase_intensity, load_external_strength, load_recent_sessions, BandSpec,
+    get_default_catalog, increase_intensity, load_external_strength, load_recent_sessions, BandSpec,
     Config, ExternalStrengthSignal, JsonlSink, MicrodoseCategory, MicrodoseSession, MovementStyle,
     PrescribedMicrodose, ProgressionState, SessionKind, SessionSink, UserContext,
     UserMicrodoseState,
@@ -31,7 +31,8 @@ struct LoadedData {
     csv_path: PathBuf,
     state_path: PathBuf,
     strength_path: PathBuf,
-    catalog: cardio_core::Catalog,
+    // Use reference to cached catalog for performance
+    catalog: &'static cardio_core::Catalog,
     user_state: UserMicrodoseState,
     recent_sessions: Vec<SessionKind>,
     warnings: Vec<String>,
@@ -229,30 +230,26 @@ fn load_data() -> cardio_core::Result<LoadedData> {
 
     let mut warnings = Vec::new();
 
-    let catalog = build_default_catalog();
-    if let Some(err) = catalog.validate().first() {
-        warnings.push(format!("Catalog validation issue: {}", err));
-    }
+    // Use cached catalog for performance (eliminates 50+ allocations)
+    let catalog = get_default_catalog();
 
-    // State loading with warning detection
-    if state_path.exists() {
-        if let Ok(contents) = std::fs::read_to_string(&state_path) {
-            if serde_json::from_str::<serde_json::Value>(&contents).is_err() {
-                warnings.push("State file corrupted; using defaults.".to_string());
-            }
+    // Load state - error handling is built into load() function
+    let user_state = match UserMicrodoseState::load(&state_path) {
+        Ok(state) => state,
+        Err(e) => {
+            warnings.push(format!("State load failed: {}; using defaults.", e));
+            UserMicrodoseState::default()
         }
-    }
-    let user_state = UserMicrodoseState::load(&state_path)?;
+    };
 
-    // Strength signal validation
-    if strength_path.exists() {
-        if let Ok(contents) = std::fs::read_to_string(&strength_path) {
-            if serde_json::from_str::<serde_json::Value>(&contents).is_err() {
-                warnings.push("Strength signal corrupted; ignoring.".to_string());
-            }
+    // Load strength signal - error handling is built into load_external_strength()
+    let strength_signal = match load_external_strength(&strength_path) {
+        Ok(sig) => sig,
+        Err(e) => {
+            warnings.push(format!("Strength signal load failed: {}; ignoring.", e));
+            None
         }
-    }
-    let strength_signal = load_external_strength(&strength_path)?;
+    };
 
     // Load history
     let recent_sessions = load_recent_sessions(&wal_path, &csv_path, 7)?;

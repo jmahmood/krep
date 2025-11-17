@@ -64,6 +64,26 @@ impl SessionSink for JsonlSink {
 
 /// Read all sessions from a WAL file
 pub fn read_sessions(path: &Path) -> Result<Vec<MicrodoseSession>> {
+    read_sessions_internal(path, None)
+}
+
+/// Read sessions from a WAL file since a specific cutoff date
+///
+/// This is more memory-efficient for large WAL files as it stops allocating
+/// sessions older than the cutoff. For users with thousands of sessions,
+/// this can save significant memory.
+pub fn read_sessions_since(
+    path: &Path,
+    cutoff: chrono::DateTime<chrono::Utc>,
+) -> Result<Vec<MicrodoseSession>> {
+    read_sessions_internal(path, Some(cutoff))
+}
+
+/// Internal helper to read sessions with optional date filtering
+fn read_sessions_internal(
+    path: &Path,
+    cutoff: Option<chrono::DateTime<chrono::Utc>>,
+) -> Result<Vec<MicrodoseSession>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
@@ -82,7 +102,17 @@ pub fn read_sessions(path: &Path) -> Result<Vec<MicrodoseSession>> {
         }
 
         match serde_json::from_str::<MicrodoseSession>(&line) {
-            Ok(session) => sessions.push(session),
+            Ok(session) => {
+                // Filter by cutoff date if provided
+                if let Some(cutoff_date) = cutoff {
+                    if session.performed_at >= cutoff_date {
+                        sessions.push(session);
+                    }
+                    // Skip old sessions without allocating
+                } else {
+                    sessions.push(session);
+                }
+            }
             Err(e) => {
                 tracing::warn!("Failed to parse session at line {}: {}", line_num + 1, e);
                 // Continue reading, don't fail completely

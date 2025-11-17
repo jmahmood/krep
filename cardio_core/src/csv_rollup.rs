@@ -59,9 +59,6 @@ pub fn wal_to_csv_and_archive(wal_path: &Path, csv_path: &Path) -> Result<usize>
         return Ok(0);
     }
 
-    // Determine if we need to write headers (file doesn't exist or is empty)
-    let needs_headers = !csv_path.exists() || csv_path.metadata()?.len() == 0;
-
     // Ensure parent directory exists
     if let Some(parent) = csv_path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -72,6 +69,10 @@ pub fn wal_to_csv_and_archive(wal_path: &Path, csv_path: &Path) -> Result<usize>
         .create(true)
         .append(true)
         .open(csv_path)?;
+
+    // Determine if we need to write headers by checking file size after opening
+    // This avoids an extra stat() syscall
+    let needs_headers = file.metadata()?.len() == 0;
 
     // CSV writer automatically writes headers if the serialized type has them
     // For appending, we need to skip headers manually if file already has content

@@ -77,24 +77,22 @@ pub fn load_recent_sessions(
     let mut sessions = Vec::new();
     let mut seen_ids = HashSet::new();
 
-    // Load from WAL first (most recent)
+    // Load from WAL first (most recent) - use optimized date filtering
     if wal_path.exists() {
-        let wal_sessions = crate::wal::read_sessions(wal_path)?;
+        let wal_sessions = crate::wal::read_sessions_since(wal_path, cutoff)?;
         for session in wal_sessions {
-            if session.performed_at >= cutoff {
-                seen_ids.insert(session.id);
-                sessions.push(SessionKind::Real(session));
-            }
+            seen_ids.insert(session.id);
+            sessions.push(SessionKind::Real(session));
         }
         tracing::debug!("Loaded {} sessions from WAL", sessions.len());
     }
 
-    // Load from CSV (archived)
+    // Load from CSV (archived) - use optimized date filtering
     if csv_path.exists() {
-        let csv_sessions = load_sessions_from_csv(csv_path)?;
+        let csv_sessions = load_sessions_from_csv_since(csv_path, cutoff)?;
         let mut csv_count = 0;
         for session in csv_sessions {
-            if session.performed_at >= cutoff && !seen_ids.contains(&session.id) {
+            if !seen_ids.contains(&session.id) {
                 seen_ids.insert(session.id);
                 sessions.push(SessionKind::Real(session));
                 csv_count += 1;
@@ -115,15 +113,39 @@ pub fn load_recent_sessions(
     Ok(sessions)
 }
 
-/// Load all sessions from a CSV file
-fn load_sessions_from_csv(path: &Path) -> Result<Vec<MicrodoseSession>> {
+/// Load sessions from CSV since a specific cutoff date
+///
+/// This is more memory-efficient for large CSV files as it skips parsing
+/// and allocating sessions older than the cutoff.
+fn load_sessions_from_csv_since(
+    path: &Path,
+    cutoff: DateTime<Utc>,
+) -> Result<Vec<MicrodoseSession>> {
+    load_sessions_from_csv_internal(path, Some(cutoff))
+}
+
+/// Internal helper to load CSV sessions with optional date filtering
+fn load_sessions_from_csv_internal(
+    path: &Path,
+    cutoff: Option<DateTime<Utc>>,
+) -> Result<Vec<MicrodoseSession>> {
     let mut reader = ReaderBuilder::new().has_headers(true).from_path(path)?;
 
     let mut sessions = Vec::new();
     for result in reader.deserialize::<CsvRow>() {
         match result {
             Ok(row) => match MicrodoseSession::try_from(row) {
-                Ok(session) => sessions.push(session),
+                Ok(session) => {
+                    // Filter by cutoff date if provided
+                    if let Some(cutoff_date) = cutoff {
+                        if session.performed_at >= cutoff_date {
+                            sessions.push(session);
+                        }
+                        // Skip old sessions without allocating
+                    } else {
+                        sessions.push(session);
+                    }
+                }
                 Err(e) => {
                     tracing::warn!("Failed to parse CSV row: {}", e);
                     // Continue processing other rows

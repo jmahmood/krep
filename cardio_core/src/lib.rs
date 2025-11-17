@@ -23,7 +23,7 @@ pub mod types;
 pub mod wal;
 
 // Re-export commonly used types
-pub use catalog::build_default_catalog;
+pub use catalog::{build_default_catalog, get_default_catalog};
 pub use config::Config;
 pub use engine::{prescribe_next, PrescribedMicrodose};
 pub use error::{Error, Result};
