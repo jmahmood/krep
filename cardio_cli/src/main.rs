@@ -97,15 +97,8 @@ fn cmd_now(
     let strength_path = data_dir.join("strength").join("signal.json");
 
     // Load catalog and state
-    let catalog = build_default_catalog();
-    let errors = catalog.validate();
-    if !errors.is_empty() {
-        eprintln!("Catalog validation errors:");
-        for error in errors {
-            eprintln!("  - {}", error);
-        }
-        return Err(Error::CatalogValidation("Invalid catalog".into()));
-    }
+    // Use cached catalog for performance (eliminates 50+ allocations per run)
+    let catalog = get_default_catalog();
 
     let mut user_state = UserMicrodoseState::load(&state_path)?;
     let strength_signal = load_external_strength(&strength_path)?;

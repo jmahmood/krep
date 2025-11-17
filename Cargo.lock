@@ -241,6 +241,7 @@ dependencies = [
  "csv",
  "dirs",
  "fs2",
+ "once_cell",
  "serde",
  "serde_json",
  "tempfile",

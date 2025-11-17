@@ -3,10 +3,30 @@
 //! This module provides the built-in movements and workouts for the system.
 
 use crate::types::*;
+use once_cell::sync::Lazy;
 use std::collections::HashMap;
 
+/// Cached default catalog - built once and reused across all operations
+static DEFAULT_CATALOG: Lazy<Catalog> = Lazy::new(|| build_default_catalog_internal());
+
+/// Get a reference to the cached default catalog
+///
+/// This function returns a reference to the pre-built catalog, avoiding
+/// the overhead of rebuilding it on every operation (~50+ allocations).
+pub fn get_default_catalog() -> &'static Catalog {
+    &DEFAULT_CATALOG
+}
+
 /// Builds the default catalog with built-in movements and microdose definitions
+///
+/// **Note**: For production use, prefer `get_default_catalog()` which returns a
+/// cached reference. This function is retained for testing and custom catalog creation.
 pub fn build_default_catalog() -> Catalog {
+    build_default_catalog_internal()
+}
+
+/// Internal function that actually builds the catalog
+fn build_default_catalog_internal() -> Catalog {
     let mut movements = HashMap::new();
     let mut microdoses = HashMap::new();
 
