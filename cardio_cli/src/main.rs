@@ -109,36 +109,69 @@ fn cmd_now(
         }
     });
 
-    // Build user context
-    let ctx = UserContext {
+    // Build user context (mutable for skip logic)
+    let mut recent_sessions = recent_sessions;
+    let mut ctx = UserContext {
         now: chrono::Utc::now(),
         user_state: user_state.clone(),
-        recent_sessions,
+        recent_sessions: recent_sessions.clone(),
         external_strength: strength_signal,
         equipment_available: config.equipment.available.clone(),
     };
 
-    // Prescribe next microdose
-    let prescription = prescribe_next(&catalog, &ctx, target_category)?;
+    // Prescription loop - allows skip to re-prescribe
+    let mut skipped_ids = std::collections::HashSet::new();
 
-    // Display prescription
-    display_prescription(&prescription);
+    loop {
+        // Update context with current sessions (may include fake skipped ones)
+        ctx.recent_sessions = recent_sessions.clone();
 
-    if dry_run {
-        println!("\n[Dry run - not logging session]");
-        return Ok(());
-    }
+        // Prescribe next microdose (clone target_category for reuse)
+        let prescription = prescribe_next(&catalog, &ctx, target_category.clone())?;
 
-    // Wait for user action (unless auto-complete)
-    let action = if auto_complete {
-        UserAction::Done
-    } else {
-        prompt_user_action()?
-    };
+        // Skip if we already showed this one
+        if skipped_ids.contains(&prescription.definition.id) {
+            // All options exhausted, reset
+            skipped_ids.clear();
+            recent_sessions.clear(); // Reset fake history
+            continue;
+        }
 
-    match action {
-        UserAction::Done => {
-            // Create session
+        // Display prescription
+        display_prescription(&prescription);
+
+        if dry_run {
+            println!("\n[Dry run - not logging session]");
+            return Ok(());
+        }
+
+        // Wait for user action (unless auto-complete)
+        let action = if auto_complete {
+            UserAction::Done
+        } else {
+            prompt_user_action()?
+        };
+
+        match action {
+            UserAction::Skip => {
+                skipped_ids.insert(prescription.definition.id.clone());
+
+                // Create a ShownButSkipped entry to influence next prescription
+                // This can NEVER reach persistence layers due to type safety
+                let skipped = SessionKind::ShownButSkipped {
+                    definition_id: prescription.definition.id.clone(),
+                    shown_at: ctx.now,
+                };
+
+                // Add to front of recent sessions to influence round-robin
+                recent_sessions.insert(0, skipped);
+
+                println!("\nShowing next option...\n");
+                continue; // Re-prescribe
+            }
+
+            UserAction::Done => {
+            // Create real session
             let session = MicrodoseSession {
                 id: uuid::Uuid::new_v4(),
                 definition_id: prescription.definition.id.clone(),
@@ -152,7 +185,7 @@ fn cmd_now(
                 max_hr: None,
             };
 
-            // Append to WAL
+            // Append to WAL (only Real sessions can reach here)
             let mut sink = JsonlSink::new(&wal_path);
             sink.append(&session)?;
 
@@ -163,20 +196,19 @@ fn cmd_now(
             }
 
             println!("\n✓ Session logged!");
-        }
+                break; // Exit loop
+            }
 
-        UserAction::Skip => {
-            println!("\nSession skipped.");
-        }
+            UserAction::Harder => {
+                // Increase intensity
+                increase_intensity(&prescription.definition.id, &mut user_state, config);
+                user_state.save(&state_path)?;
 
-        UserAction::Harder => {
-            // Increase intensity
-            increase_intensity(&prescription.definition.id, &mut user_state, config);
-            user_state.save(&state_path)?;
-
-            println!("\n✓ Intensity increased for next time!");
-            println!("  Level: {}", user_state.progressions[&prescription.definition.id].level);
-            println!("  Reps: {}", user_state.progressions[&prescription.definition.id].reps);
+                println!("\n✓ Intensity increased for next time!");
+                println!("  Level: {}", user_state.progressions[&prescription.definition.id].level);
+                println!("  Reps: {}", user_state.progressions[&prescription.definition.id].reps);
+                break; // Exit loop
+            }
         }
     }
 

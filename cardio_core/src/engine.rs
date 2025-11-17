@@ -38,13 +38,35 @@ pub fn prescribe_next(
     target_category: Option<MicrodoseCategory>,
 ) -> Result<PrescribedMicrodose> {
     // Determine category to prescribe
-    let category = if let Some(cat) = target_category {
+    let mut category = if let Some(cat) = target_category {
         cat
     } else {
         determine_category(ctx)?
     };
 
     tracing::info!("Prescribing microdose from category: {:?}", category);
+
+    // Fallback if the determined category doesn't exist in catalog
+    // Try in order: suggested → Vo2 → Gtg → Mobility → error
+    if !has_category(catalog, &category) {
+        tracing::warn!(
+            "Category {:?} not found in catalog, trying fallbacks",
+            category
+        );
+
+        let fallback_order = vec![
+            MicrodoseCategory::Vo2,
+            MicrodoseCategory::Gtg,
+            MicrodoseCategory::Mobility,
+        ];
+
+        category = fallback_order
+            .into_iter()
+            .find(|cat| has_category(catalog, cat))
+            .ok_or_else(|| Error::Prescription("No microdoses available in catalog".into()))?;
+
+        tracing::info!("Using fallback category: {:?}", category);
+    }
 
     // Select definition from category
     let definition = select_definition_from_category(catalog, ctx, &category)?;
@@ -80,7 +102,7 @@ fn determine_category(ctx: &UserContext) -> Result<MicrodoseCategory> {
     let last_vo2 = crate::history::find_last_session_by_category(&ctx.recent_sessions, "vo2");
 
     if let Some(last_vo2_session) = last_vo2 {
-        let time_since_vo2 = ctx.now - last_vo2_session.performed_at;
+        let time_since_vo2 = ctx.now - last_vo2_session.timestamp();
 
         if time_since_vo2 > Duration::hours(4) {
             tracing::info!(
@@ -89,11 +111,8 @@ fn determine_category(ctx: &UserContext) -> Result<MicrodoseCategory> {
             );
             return Ok(MicrodoseCategory::Vo2);
         }
-    } else {
-        // No VO2 sessions in history → prescribe VO2
-        tracing::info!("No recent VO2 sessions found, prescribing VO2");
-        return Ok(MicrodoseCategory::Vo2);
     }
+    // If no VO2 in history, fall through to round-robin
 
     // Rule 3: Default round-robin based on last category
     let last_category = ctx
@@ -101,11 +120,12 @@ fn determine_category(ctx: &UserContext) -> Result<MicrodoseCategory> {
         .first()
         .and_then(|s| {
             // Infer category from definition ID
-            if s.definition_id.contains("vo2") || s.definition_id.contains("emom") {
+            let def_id = s.definition_id();
+            if def_id.contains("vo2") || def_id.contains("emom") {
                 Some(MicrodoseCategory::Vo2)
-            } else if s.definition_id.contains("gtg") {
+            } else if def_id.contains("gtg") {
                 Some(MicrodoseCategory::Gtg)
-            } else if s.definition_id.contains("mobility") {
+            } else if def_id.contains("mobility") {
                 Some(MicrodoseCategory::Mobility)
             } else {
                 None
@@ -121,6 +141,11 @@ fn determine_category(ctx: &UserContext) -> Result<MicrodoseCategory> {
 
     tracing::info!("Round-robin selection: {:?}", next_category);
     Ok(next_category)
+}
+
+/// Helper to check if a catalog has any microdoses in a category
+fn has_category(catalog: &Catalog, category: &MicrodoseCategory) -> bool {
+    catalog.microdoses.values().any(|d| &d.category == category)
 }
 
 /// Select a specific definition from a category
@@ -153,8 +178,11 @@ fn select_definition_from_category<'a>(
             let last_vo2_def = ctx
                 .recent_sessions
                 .iter()
-                .find(|s| s.definition_id.contains("vo2") || s.definition_id.contains("emom"))
-                .map(|s| s.definition_id.as_str());
+                .find(|s| {
+                    let def_id = s.definition_id();
+                    def_id.contains("vo2") || def_id.contains("emom")
+                })
+                .map(|s| s.definition_id());
 
             // Pick the one we didn't do last time
             if let Some(last) = last_vo2_def {
@@ -309,5 +337,127 @@ mod tests {
 
         // Should use default from definition
         assert_eq!(reps, Some(3));
+    }
+
+    // ========================================================================
+    // Behavioral Tests for SessionKind Safety and Edge Cases
+    // ========================================================================
+
+    #[test]
+    fn test_single_category_environment() {
+        // Test that when only one category is available, the engine doesn't loop
+        // and keeps prescribing from that category
+        use std::collections::HashMap;
+
+        let mut catalog = build_default_catalog();
+
+        // Keep only VO2 microdoses
+        catalog.microdoses.retain(|id, def| {
+            def.category == MicrodoseCategory::Vo2
+        });
+
+        let ctx = create_test_context();
+
+        // First prescription should be VO2
+        let p1 = prescribe_next(&catalog, &ctx, None).unwrap();
+        assert_eq!(p1.definition.category, MicrodoseCategory::Vo2);
+
+        // Create a context with history of the first prescription
+        let mut ctx2 = create_test_context();
+        ctx2.recent_sessions = vec![crate::SessionKind::Real(crate::MicrodoseSession {
+            id: uuid::Uuid::new_v4(),
+            definition_id: p1.definition.id.clone(),
+            performed_at: Utc::now(),
+            started_at: Some(Utc::now()),
+            completed_at: Some(Utc::now()),
+            actual_duration_seconds: Some(300),
+            metrics_realized: vec![],
+            perceived_rpe: None,
+            avg_hr: None,
+            max_hr: None,
+        })];
+
+        // Second prescription should still be VO2 (no infinite loop)
+        let p2 = prescribe_next(&catalog, &ctx2, None).unwrap();
+        assert_eq!(p2.definition.category, MicrodoseCategory::Vo2);
+    }
+
+    #[test]
+    fn test_strength_override_with_skip_interaction() {
+        // Test that strength override still works correctly when skipping
+        let catalog = build_default_catalog();
+        let mut ctx = create_test_context();
+
+        // Set up recent lower-body strength signal
+        ctx.external_strength = Some(ExternalStrengthSignal {
+            last_session_at: Utc::now() - Duration::hours(12),
+            session_type: StrengthSessionType::Lower,
+        });
+
+        // First prescription should be GTG (strength override)
+        let p1 = prescribe_next(&catalog, &ctx, None).unwrap();
+        assert_eq!(p1.definition.category, MicrodoseCategory::Gtg);
+
+        // User skips - add ShownButSkipped to context
+        ctx.recent_sessions.insert(0, crate::SessionKind::ShownButSkipped {
+            definition_id: p1.definition.id.clone(),
+            shown_at: ctx.now,
+        });
+
+        // Next prescription should still respect strength override
+        // But may choose a different definition if available
+        let p2 = prescribe_next(&catalog, &ctx, None).unwrap();
+        assert_eq!(p2.definition.category, MicrodoseCategory::Gtg);
+    }
+
+    #[test]
+    fn test_mixed_history_with_skip_patterns() {
+        // Test that round-robin works correctly with mix of Real and ShownButSkipped
+        let catalog = build_default_catalog();
+        let mut ctx = create_test_context();
+
+        let now = Utc::now();
+
+        // Create history: VO2 (real) → GTG (skipped) → Mobility (real)
+        ctx.recent_sessions = vec![
+            crate::SessionKind::Real(crate::MicrodoseSession {
+                id: uuid::Uuid::new_v4(),
+                definition_id: "mobility_hip_cars".to_string(),
+                performed_at: now - Duration::hours(1),
+                started_at: Some(now - Duration::hours(1)),
+                completed_at: Some(now - Duration::hours(1)),
+                actual_duration_seconds: Some(60),
+                metrics_realized: vec![],
+                perceived_rpe: None,
+                avg_hr: None,
+                max_hr: None,
+            }),
+            crate::SessionKind::ShownButSkipped {
+                definition_id: "gtg_pullup_band".to_string(),
+                shown_at: now - Duration::hours(2),
+            },
+            crate::SessionKind::Real(crate::MicrodoseSession {
+                id: uuid::Uuid::new_v4(),
+                definition_id: "emom_burpee_5m".to_string(),
+                performed_at: now - Duration::hours(3),
+                started_at: Some(now - Duration::hours(3)),
+                completed_at: Some(now - Duration::hours(3)),
+                actual_duration_seconds: Some(300),
+                metrics_realized: vec![],
+                perceived_rpe: None,
+                avg_hr: None,
+                max_hr: None,
+            }),
+        ];
+
+        // Next should be VO2 (round-robin after Mobility)
+        let prescription = prescribe_next(&catalog, &ctx, None).unwrap();
+        assert_eq!(prescription.definition.category, MicrodoseCategory::Vo2);
+
+        // Verify that both Real and ShownButSkipped are counted for round-robin
+        assert_eq!(ctx.recent_sessions.len(), 3);
+        assert!(ctx.recent_sessions[0].definition_id().contains("mobility"));
+        assert!(ctx.recent_sessions[1].definition_id().contains("gtg"));
+        assert!(ctx.recent_sessions[2].definition_id().contains("burpee"));
     }
 }

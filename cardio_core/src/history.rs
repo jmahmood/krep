@@ -3,7 +3,7 @@
 //! This module loads recent session history from both WAL and CSV files
 //! to provide context for the prescription engine.
 
-use crate::{MicrodoseSession, Result};
+use crate::{MicrodoseSession, Result, SessionKind};
 use chrono::{DateTime, Duration, Utc};
 use csv::ReaderBuilder;
 use serde::Deserialize;
@@ -67,11 +67,12 @@ impl TryFrom<CsvRow> for MicrodoseSession {
 ///
 /// Returns sessions sorted by performed_at (newest first).
 /// Automatically deduplicates sessions that appear in both WAL and CSV.
+/// All loaded sessions are wrapped in SessionKind::Real.
 pub fn load_recent_sessions(
     wal_path: &Path,
     csv_path: &Path,
     days: i64,
-) -> Result<Vec<MicrodoseSession>> {
+) -> Result<Vec<SessionKind>> {
     let cutoff = Utc::now() - Duration::days(days);
     let mut sessions = Vec::new();
     let mut seen_ids = HashSet::new();
@@ -82,7 +83,7 @@ pub fn load_recent_sessions(
         for session in wal_sessions {
             if session.performed_at >= cutoff {
                 seen_ids.insert(session.id);
-                sessions.push(session);
+                sessions.push(SessionKind::Real(session));
             }
         }
         tracing::debug!("Loaded {} sessions from WAL", sessions.len());
@@ -95,15 +96,15 @@ pub fn load_recent_sessions(
         for session in csv_sessions {
             if session.performed_at >= cutoff && !seen_ids.contains(&session.id) {
                 seen_ids.insert(session.id);
-                sessions.push(session);
+                sessions.push(SessionKind::Real(session));
                 csv_count += 1;
             }
         }
         tracing::debug!("Loaded {} sessions from CSV", csv_count);
     }
 
-    // Sort by performed_at, newest first
-    sessions.sort_by(|a, b| b.performed_at.cmp(&a.performed_at));
+    // Sort by timestamp, newest first
+    sessions.sort_by(|a, b| b.timestamp().cmp(&a.timestamp()));
 
     tracing::info!(
         "Loaded {} total sessions from last {} days",
@@ -139,13 +140,13 @@ fn load_sessions_from_csv(path: &Path) -> Result<Vec<MicrodoseSession>> {
 
 /// Find the most recent session for a given category
 pub fn find_last_session_by_category<'a>(
-    sessions: &'a [MicrodoseSession],
+    sessions: &'a [SessionKind],
     category: &str,
-) -> Option<&'a MicrodoseSession> {
+) -> Option<&'a SessionKind> {
     // Sessions should already be sorted newest first
     sessions
         .iter()
-        .find(|s| s.definition_id.contains(category))
+        .find(|s| s.definition_id().contains(category))
 }
 
 #[cfg(test)]
@@ -182,6 +183,8 @@ mod tests {
 
         let sessions = load_recent_sessions(&wal_path, &csv_path, 7).unwrap();
         assert_eq!(sessions.len(), 2);
+        // Verify they're all Real sessions
+        assert!(sessions.iter().all(|s| matches!(s, SessionKind::Real(_))));
     }
 
     #[test]
@@ -208,11 +211,26 @@ mod tests {
         .unwrap();
 
         // Find the session
-        let found = sessions.iter().find(|s| s.id == session_id);
+        let found = sessions.iter().find(|s| {
+            if let SessionKind::Real(real_session) = s {
+                real_session.id == session_id
+            } else {
+                false
+            }
+        });
         assert!(found.is_some());
 
         // Count how many times it appears (should be 1)
-        let count = sessions.iter().filter(|s| s.id == session_id).count();
+        let count = sessions
+            .iter()
+            .filter(|s| {
+                if let SessionKind::Real(real_session) = s {
+                    real_session.id == session_id
+                } else {
+                    false
+                }
+            })
+            .count();
         assert_eq!(count, 1);
     }
 
@@ -233,8 +251,8 @@ mod tests {
         let sessions = load_recent_sessions(&wal_path, &csv_path, 7).unwrap();
 
         // Should be sorted newest first
-        assert_eq!(sessions[0].definition_id, "new");
-        assert_eq!(sessions[1].definition_id, "old");
+        assert_eq!(sessions[0].definition_id(), "new");
+        assert_eq!(sessions[1].definition_id(), "old");
     }
 
     #[test]
@@ -243,10 +261,18 @@ mod tests {
         let s2 = create_test_session("gtg_pullup", 2);
         let s3 = create_test_session("emom_vo2", 1);
 
-        let sessions = vec![s3.clone(), s2, s1]; // Already sorted newest first
+        let sessions = vec![
+            SessionKind::Real(s3.clone()),
+            SessionKind::Real(s2),
+            SessionKind::Real(s1),
+        ]; // Already sorted newest first
 
         let last_vo2 = find_last_session_by_category(&sessions, "vo2");
         assert!(last_vo2.is_some());
-        assert_eq!(last_vo2.unwrap().id, s3.id);
+        if let Some(SessionKind::Real(real_session)) = last_vo2 {
+            assert_eq!(real_session.id, s3.id);
+        } else {
+            panic!("Expected Real session");
+        }
     }
 }

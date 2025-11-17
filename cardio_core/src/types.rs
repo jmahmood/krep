@@ -142,6 +142,47 @@ pub struct MicrodoseSession {
     pub max_hr: Option<u8>,
 }
 
+/// Type-level distinction between real sessions and skipped prescriptions
+///
+/// This ensures that skipped sessions (used only for influencing the prescription
+/// engine) can never accidentally reach persistence layers (WAL, CSV, state).
+#[derive(Clone, Debug)]
+pub enum SessionKind {
+    /// A real session that was performed and should be persisted
+    Real(MicrodoseSession),
+    /// A prescription that was shown but skipped (in-memory only)
+    ShownButSkipped {
+        definition_id: String,
+        shown_at: DateTime<Utc>,
+    },
+}
+
+impl SessionKind {
+    /// Get the definition ID for this session (works for both Real and ShownButSkipped)
+    pub fn definition_id(&self) -> &str {
+        match self {
+            SessionKind::Real(session) => &session.definition_id,
+            SessionKind::ShownButSkipped { definition_id, .. } => definition_id,
+        }
+    }
+
+    /// Get the timestamp when this session/prescription occurred
+    pub fn timestamp(&self) -> DateTime<Utc> {
+        match self {
+            SessionKind::Real(session) => session.performed_at,
+            SessionKind::ShownButSkipped { shown_at, .. } => *shown_at,
+        }
+    }
+
+    /// Check if this is a Real session (returns None for ShownButSkipped)
+    pub fn as_real(&self) -> Option<&MicrodoseSession> {
+        match self {
+            SessionKind::Real(session) => Some(session),
+            SessionKind::ShownButSkipped { .. } => None,
+        }
+    }
+}
+
 /// Progression state for a specific microdose definition (v1.1 improved design)
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProgressionState {
@@ -180,7 +221,7 @@ pub struct ExternalStrengthSignal {
 pub struct UserContext {
     pub now: DateTime<Utc>,
     pub user_state: UserMicrodoseState,
-    pub recent_sessions: Vec<MicrodoseSession>,
+    pub recent_sessions: Vec<SessionKind>,
     pub external_strength: Option<ExternalStrengthSignal>,
     pub equipment_available: Vec<String>,
 }
