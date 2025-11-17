@@ -165,6 +165,9 @@ fn main() {
 }
 
 fn setup_tray(app: &Application) {
+    // Prevent the app from quitting when the window is closed.
+    Box::leak(Box::new(app.hold()));
+
     let (tx, rx) = channel::<TrayEvent>();
 
     let _svc = ksni::TrayService::new(KrepTray { tx }).spawn();
