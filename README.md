@@ -207,6 +207,62 @@ Default `DATA_DIR`: `~/.local/share/krep`
 - **Testability**: 42 unit tests, deterministic prescription logic
 - **No Unsafe Code**: `#![forbid(unsafe_code)]` in core library
 
+## Apple Watch Implementation
+
+A native watchOS version of Krep is available as a **pure Swift port** of the core business logic.
+
+### Status: Phase 1 Complete ✅
+
+- **Core Logic Ported** (~500 LOC)
+  - Types, Catalog, Engine, Progression
+  - 1:1 Swift equivalents of Rust types
+  - Full v1.1 prescription algorithm
+
+- **Unit Tests** (20+ tests)
+  - Catalog validation
+  - Prescription engine rules
+  - Progression algorithms
+
+### Location
+
+```
+cardio_watch/
+├── Package.swift              # Swift Package Manager config
+├── Sources/CardioCore/        # Business logic port
+│   ├── Types.swift            # Domain types
+│   ├── Catalog.swift          # Workout definitions
+│   ├── Engine.swift           # Prescription algorithm
+│   └── Progression.swift      # Intensity upgrades
+└── Tests/CoreTests/           # XCTest unit tests
+```
+
+### Next Steps (Requires macOS + Xcode)
+
+Phase 2-5 implementation requires Xcode on macOS:
+- **watchOS UI** (SwiftUI views)
+- **SwiftData storage** (replaces WAL)
+- **HealthKit integration** (live HR monitoring)
+- **iPhone companion app** (analytics, sync)
+
+### Documentation
+
+See **[docs/WATCH_IMPLEMENTATION.md](docs/WATCH_IMPLEMENTATION.md)** for:
+- Architecture decisions (Why Swift over FFI?)
+- Type mappings (Rust → Swift)
+- Implementation guide (UI, storage, HealthKit)
+- Build instructions (Xcode setup)
+- Migration guide (Rust data → watchOS)
+
+### Features (Planned)
+
+- ⌚ **Native watchOS app** with live workouts
+- ❤️ **HealthKit integration** for HR tracking
+- 📊 **SwiftData persistence** with iCloud sync
+- 🔔 **Complications** showing last workout
+- 📱 **iPhone companion** for analytics
+
+**Estimated completion**: 1-2 weeks for experienced iOS developer
+
 ## Testing
 
 ```bash
