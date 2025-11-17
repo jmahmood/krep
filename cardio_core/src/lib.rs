@@ -9,26 +9,26 @@
 //! - Persistence (WAL, CSV, state)
 //! - Progression logic
 
-pub mod types;
-pub mod error;
 pub mod catalog;
 pub mod config;
-pub mod logging;
-pub mod wal;
 pub mod csv_rollup;
+pub mod engine;
+pub mod error;
+pub mod history;
+pub mod logging;
+pub mod progression;
 pub mod state;
 pub mod strength;
-pub mod history;
-pub mod progression;
-pub mod engine;
+pub mod types;
+pub mod wal;
 
 // Re-export commonly used types
-pub use error::{Error, Result};
-pub use types::*;
 pub use catalog::build_default_catalog;
 pub use config::Config;
-pub use wal::{JsonlSink, SessionSink};
-pub use strength::load_external_strength;
+pub use engine::{prescribe_next, PrescribedMicrodose};
+pub use error::{Error, Result};
 pub use history::load_recent_sessions;
 pub use progression::increase_intensity;
-pub use engine::{prescribe_next, PrescribedMicrodose};
+pub use strength::load_external_strength;
+pub use types::*;
+pub use wal::{JsonlSink, SessionSink};

@@ -22,9 +22,7 @@ pub fn build_default_catalog() -> Catalog {
             kind: MovementKind::KettlebellSwing,
             default_style: MovementStyle::None,
             tags: vec!["vo2".into(), "hinge".into(), "posterior_chain".into()],
-            reference_url: Some(
-                "https://www.youtube.com/watch?v=YSxHifyI6s8".into(),
-            ),
+            reference_url: Some("https://www.youtube.com/watch?v=YSxHifyI6s8".into()),
         },
     );
 
@@ -36,9 +34,7 @@ pub fn build_default_catalog() -> Catalog {
             kind: MovementKind::Burpee,
             default_style: MovementStyle::Burpee(BurpeeStyle::FourCount),
             tags: vec!["vo2".into(), "full_body".into(), "bodyweight".into()],
-            reference_url: Some(
-                "https://www.youtube.com/watch?v=TU8QYVW0gDU".into(),
-            ),
+            reference_url: Some("https://www.youtube.com/watch?v=TU8QYVW0gDU".into()),
         },
     );
 
@@ -55,9 +51,7 @@ pub fn build_default_catalog() -> Catalog {
                 "upper_body".into(),
                 "pull".into(),
             ],
-            reference_url: Some(
-                "https://www.youtube.com/watch?v=eGo4IYlbE5g".into(),
-            ),
+            reference_url: Some("https://www.youtube.com/watch?v=eGo4IYlbE5g".into()),
         },
     );
 
@@ -69,9 +63,7 @@ pub fn build_default_catalog() -> Catalog {
             kind: MovementKind::MobilityDrill,
             default_style: MovementStyle::None,
             tags: vec!["mobility".into(), "hip".into(), "gtg_ok".into()],
-            reference_url: Some(
-                "https://www.youtube.com/watch?v=mJRXBZGRzKg".into(),
-            ),
+            reference_url: Some("https://www.youtube.com/watch?v=mJRXBZGRzKg".into()),
         },
     );
 
@@ -83,9 +75,7 @@ pub fn build_default_catalog() -> Catalog {
             kind: MovementKind::MobilityDrill,
             default_style: MovementStyle::None,
             tags: vec!["mobility".into(), "shoulder".into(), "gtg_ok".into()],
-            reference_url: Some(
-                "https://www.youtube.com/watch?v=f9y1lOJ0v4A".into(),
-            ),
+            reference_url: Some("https://www.youtube.com/watch?v=f9y1lOJ0v4A".into()),
         },
     );
 
@@ -407,7 +397,10 @@ mod tests {
             .values()
             .filter(|d| d.category == MicrodoseCategory::Mobility)
             .count();
-        assert!(mobility_count >= 2, "Should have at least 2 mobility workouts");
+        assert!(
+            mobility_count >= 2,
+            "Should have at least 2 mobility workouts"
+        );
     }
 
     #[test]

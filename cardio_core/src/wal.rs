@@ -3,7 +3,7 @@
 //! Sessions are append to a JSONL (JSON Lines) file with file locking
 //! to ensure safe concurrent access.
 
-use crate::{Error, MicrodoseSession, Result};
+use crate::{MicrodoseSession, Result};
 use fs2::FileExt;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
@@ -22,9 +22,7 @@ pub struct JsonlSink {
 impl JsonlSink {
     /// Create a new JSONL sink for the given path
     pub fn new(path: impl Into<PathBuf>) -> Self {
-        Self {
-            path: path.into(),
-        }
+        Self { path: path.into() }
     }
 
     /// Ensure the parent directory exists
@@ -86,11 +84,7 @@ pub fn read_sessions(path: &Path) -> Result<Vec<MicrodoseSession>> {
         match serde_json::from_str::<MicrodoseSession>(&line) {
             Ok(session) => sessions.push(session),
             Err(e) => {
-                tracing::warn!(
-                    "Failed to parse session at line {}: {}",
-                    line_num + 1,
-                    e
-                );
+                tracing::warn!("Failed to parse session at line {}: {}", line_num + 1, e);
                 // Continue reading, don't fail completely
             }
         }

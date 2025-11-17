@@ -4,7 +4,7 @@
 //! to prevent data loss.
 
 use crate::{MicrodoseSession, Result};
-use std::fs::{File, OpenOptions};
+use std::fs::OpenOptions;
 use std::path::Path;
 
 /// A row in the CSV output
@@ -137,6 +137,7 @@ mod tests {
     use super::*;
     use crate::wal::SessionSink;
     use chrono::Utc;
+    use std::fs::File;
     use uuid::Uuid;
 
     fn create_test_session(def_id: &str) -> MicrodoseSession {

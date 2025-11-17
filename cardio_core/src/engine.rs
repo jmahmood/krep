@@ -6,8 +6,8 @@
 //! - Round-robin selection for categories and definitions
 
 use crate::{
-    Catalog, Error, MicrodoseCategory, MicrodoseDefinition, ProgressionState, Result,
-    StrengthSessionType, UserContext,
+    Catalog, Error, MicrodoseCategory, MicrodoseDefinition, Result, StrengthSessionType,
+    UserContext,
 };
 use chrono::Duration;
 
@@ -115,22 +115,19 @@ fn determine_category(ctx: &UserContext) -> Result<MicrodoseCategory> {
     // If no VO2 in history, fall through to round-robin
 
     // Rule 3: Default round-robin based on last category
-    let last_category = ctx
-        .recent_sessions
-        .first()
-        .and_then(|s| {
-            // Infer category from definition ID
-            let def_id = s.definition_id();
-            if def_id.contains("vo2") || def_id.contains("emom") {
-                Some(MicrodoseCategory::Vo2)
-            } else if def_id.contains("gtg") {
-                Some(MicrodoseCategory::Gtg)
-            } else if def_id.contains("mobility") {
-                Some(MicrodoseCategory::Mobility)
-            } else {
-                None
-            }
-        });
+    let last_category = ctx.recent_sessions.first().and_then(|s| {
+        // Infer category from definition ID
+        let def_id = s.definition_id();
+        if def_id.contains("vo2") || def_id.contains("emom") {
+            Some(MicrodoseCategory::Vo2)
+        } else if def_id.contains("gtg") {
+            Some(MicrodoseCategory::Gtg)
+        } else if def_id.contains("mobility") {
+            Some(MicrodoseCategory::Mobility)
+        } else {
+            None
+        }
+    });
 
     let next_category = match last_category {
         Some(MicrodoseCategory::Vo2) => MicrodoseCategory::Gtg,
@@ -249,7 +246,9 @@ fn compute_intensity(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{build_default_catalog, ExternalStrengthSignal, UserMicrodoseState};
+    use crate::{
+        build_default_catalog, ExternalStrengthSignal, ProgressionState, UserMicrodoseState,
+    };
     use chrono::Utc;
 
     fn create_test_context() -> UserContext {
@@ -292,13 +291,9 @@ mod tests {
         let catalog = build_default_catalog();
         let ctx = create_test_context();
 
-        let prescribed =
-            prescribe_next(&catalog, &ctx, Some(MicrodoseCategory::Mobility)).unwrap();
+        let prescribed = prescribe_next(&catalog, &ctx, Some(MicrodoseCategory::Mobility)).unwrap();
 
-        assert_eq!(
-            prescribed.definition.category,
-            MicrodoseCategory::Mobility
-        );
+        assert_eq!(prescribed.definition.category, MicrodoseCategory::Mobility);
     }
 
     #[test]
@@ -347,14 +342,12 @@ mod tests {
     fn test_single_category_environment() {
         // Test that when only one category is available, the engine doesn't loop
         // and keeps prescribing from that category
-        use std::collections::HashMap;
-
         let mut catalog = build_default_catalog();
 
         // Keep only VO2 microdoses
-        catalog.microdoses.retain(|id, def| {
-            def.category == MicrodoseCategory::Vo2
-        });
+        catalog
+            .microdoses
+            .retain(|_id, def| def.category == MicrodoseCategory::Vo2);
 
         let ctx = create_test_context();
 
@@ -399,10 +392,13 @@ mod tests {
         assert_eq!(p1.definition.category, MicrodoseCategory::Gtg);
 
         // User skips - add ShownButSkipped to context
-        ctx.recent_sessions.insert(0, crate::SessionKind::ShownButSkipped {
-            definition_id: p1.definition.id.clone(),
-            shown_at: ctx.now,
-        });
+        ctx.recent_sessions.insert(
+            0,
+            crate::SessionKind::ShownButSkipped {
+                definition_id: p1.definition.id.clone(),
+                shown_at: ctx.now,
+            },
+        );
 
         // Next prescription should still respect strength override
         // But may choose a different definition if available

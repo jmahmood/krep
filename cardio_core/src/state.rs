@@ -5,29 +5,55 @@
 
 use crate::{Error, Result, UserMicrodoseState};
 use fs2::FileExt;
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::{Read, Write};
 use std::path::Path;
+use tempfile::NamedTempFile;
 
 impl UserMicrodoseState {
     /// Load user state from a file with shared locking
     ///
     /// Returns default state if file doesn't exist.
-    /// If file is corrupted, returns an error.
+    /// If file is corrupted, logs a warning and returns default state.
     pub fn load(path: &Path) -> Result<Self> {
         if !path.exists() {
             tracing::info!("No state file found, using default state");
             return Ok(Self::default());
         }
 
-        let file = File::open(path)?;
+        let file = match File::open(path) {
+            Ok(f) => f,
+            Err(e) => {
+                tracing::warn!(
+                    "Unable to open state file {:?}: {}. Using defaults.",
+                    path,
+                    e
+                );
+                return Ok(Self::default());
+            }
+        };
 
         // Acquire shared lock for reading
-        file.lock_shared()?;
+        if let Err(e) = file.lock_shared() {
+            tracing::warn!(
+                "Unable to lock state file {:?}: {}. Using defaults.",
+                path,
+                e
+            );
+            return Ok(Self::default());
+        }
 
         let mut contents = String::new();
         let mut reader = std::io::BufReader::new(&file);
-        reader.read_to_string(&mut contents)?;
+        if let Err(e) = reader.read_to_string(&mut contents) {
+            let _ = file.unlock();
+            tracing::warn!(
+                "Failed to read state file {:?}: {}. Using defaults.",
+                path,
+                e
+            );
+            return Ok(Self::default());
+        }
 
         file.unlock()?;
 
@@ -37,11 +63,12 @@ impl UserMicrodoseState {
                 Ok(state)
             }
             Err(e) => {
-                tracing::error!("Failed to parse state file: {}", e);
-                Err(Error::State(format!(
-                    "Corrupted state file: {}. Consider deleting it to reset.",
+                tracing::warn!(
+                    "Failed to parse state file {:?}: {}. Using defaults.",
+                    path,
                     e
-                )))
+                );
+                Ok(Self::default())
             }
         }
     }
@@ -58,31 +85,26 @@ impl UserMicrodoseState {
             std::fs::create_dir_all(parent)?;
         }
 
-        // Write to temporary file first
-        let temp_path = path.with_extension("tmp");
+        // Create unique temp file in the same directory for atomic rename
+        let temp = NamedTempFile::new_in(path.parent().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::Other, "state path missing parent")
+        })?)?;
 
-        let file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(&temp_path)?;
-
-        // Acquire exclusive lock
-        file.lock_exclusive()?;
+        // Acquire exclusive lock on the temp file to serialize concurrent writers
+        temp.as_file().lock_exclusive()?;
 
         {
-            let mut writer = std::io::BufWriter::new(&file);
+            let mut writer = std::io::BufWriter::new(temp.as_file());
             let contents = serde_json::to_string_pretty(self)?;
             writer.write_all(contents.as_bytes())?;
             writer.flush()?;
-        } // writer dropped here, releasing borrow
+        }
 
-        // Sync to disk before rename
-        file.sync_all()?;
-        file.unlock()?;
+        temp.as_file().sync_all()?;
+        temp.as_file().unlock()?;
 
         // Atomically replace old state file
-        std::fs::rename(&temp_path, path)?;
+        temp.persist(path).map_err(|e| Error::Io(e.error))?;
 
         tracing::debug!("Saved user state to {:?}", path);
         Ok(())
@@ -134,7 +156,10 @@ mod tests {
 
         assert_eq!(loaded.progressions.len(), 1);
         assert!(loaded.progressions.contains_key("emom_burpee_5m"));
-        assert_eq!(loaded.last_mobility_def_id, Some("mobility_hip_cars".into()));
+        assert_eq!(
+            loaded.last_mobility_def_id,
+            Some("mobility_hip_cars".into())
+        );
     }
 
     #[test]
@@ -176,12 +201,10 @@ mod tests {
         std::fs::write(&state_path, "{ invalid json }").unwrap();
 
         let result = UserMicrodoseState::load(&state_path);
-        assert!(result.is_err());
-
-        match result {
-            Err(Error::State(_)) => {} // Expected
-            _ => panic!("Expected State error"),
-        }
+        assert!(result.is_ok());
+        let state = result.unwrap();
+        assert!(state.progressions.is_empty());
+        assert!(state.last_mobility_def_id.is_none());
     }
 
     #[test]
@@ -192,8 +215,17 @@ mod tests {
         let state = UserMicrodoseState::default();
         state.save(&state_path).unwrap();
 
-        // Verify no temp file left behind
-        assert!(!temp_dir.path().join("state.tmp").exists());
+        // Verify state file exists and no stray temp files remain
         assert!(state_path.exists());
+        let extras: Vec<_> = std::fs::read_dir(temp_dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name() != "state.json")
+            .collect();
+        assert!(
+            extras.is_empty(),
+            "Expected only state.json, found extras: {:?}",
+            extras
+        );
     }
 }

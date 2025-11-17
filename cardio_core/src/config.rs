@@ -89,19 +89,14 @@ pub struct MobilityConfig {
 // Default value functions
 fn default_data_dir() -> PathBuf {
     let base = dirs::data_local_dir().unwrap_or_else(|| {
-        let home = std::env::var("HOME")
-            .expect("HOME environment variable not set");
+        let home = std::env::var("HOME").expect("HOME environment variable not set");
         PathBuf::from(home).join(".local/share")
     });
     base.join("krep")
 }
 
 fn default_equipment() -> Vec<String> {
-    vec![
-        "kettlebell".into(),
-        "pullup_bar".into(),
-        "bands".into(),
-    ]
+    vec!["kettlebell".into(), "pullup_bar".into(), "bands".into()]
 }
 
 fn default_burpee_rep_ceiling() -> i32 {
@@ -119,10 +114,7 @@ impl Config {
         if config_path.exists() {
             Self::load_from(&config_path)
         } else {
-            tracing::info!(
-                "No config file found at {:?}, using defaults",
-                config_path
-            );
+            tracing::info!("No config file found at {:?}, using defaults", config_path);
             Ok(Self::default())
         }
     }
@@ -138,8 +130,7 @@ impl Config {
     /// Get the default config file path
     pub fn default_config_path() -> PathBuf {
         let base = dirs::config_dir().unwrap_or_else(|| {
-            let home = std::env::var("HOME")
-                .expect("HOME environment variable not set");
+            let home = std::env::var("HOME").expect("HOME environment variable not set");
             PathBuf::from(home).join(".config")
         });
         base.join("krep").join("config.toml")
@@ -188,10 +179,7 @@ mod tests {
             config.progression.burpee_rep_ceiling,
             parsed.progression.burpee_rep_ceiling
         );
-        assert_eq!(
-            config.equipment.available,
-            parsed.equipment.available
-        );
+        assert_eq!(config.equipment.available, parsed.equipment.available);
     }
 
     #[test]

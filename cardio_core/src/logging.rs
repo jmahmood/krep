@@ -23,8 +23,8 @@ pub fn init() {
 ///
 /// This can still be overridden by RUST_LOG environment variable.
 pub fn init_with_level(default_level: &str) {
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(default_level));
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_level));
 
     tracing_subscriber::registry()
         .with(filter)

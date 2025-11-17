@@ -28,8 +28,12 @@ enum Commands {
         dry_run: bool,
 
         /// Auto-complete (for testing) - automatically mark as done
-        #[arg(long)]
+        #[arg(long, conflicts_with = "auto_complete_skip")]
         auto_complete: bool,
+
+        /// Auto-skip (for testing) - automatically skip a few prescriptions then mark done
+        #[arg(long, conflicts_with = "auto_complete")]
+        auto_complete_skip: bool,
     },
 
     /// Roll up WAL sessions to CSV
@@ -55,11 +59,19 @@ fn main() -> Result<()> {
             category,
             dry_run,
             auto_complete,
-        }) => cmd_now(data_dir, category, dry_run, auto_complete, &config),
+            auto_complete_skip,
+        }) => cmd_now(
+            data_dir,
+            category,
+            dry_run,
+            auto_complete,
+            auto_complete_skip,
+            &config,
+        ),
         Some(Commands::Rollup { cleanup }) => cmd_rollup(data_dir, cleanup),
         None => {
             // Default to "now" command
-            cmd_now(data_dir, None, false, false, &config)
+            cmd_now(data_dir, None, false, false, false, &config)
         }
     }
 }
@@ -69,8 +81,11 @@ fn cmd_now(
     category: Option<String>,
     dry_run: bool,
     auto_complete: bool,
+    auto_complete_skip: bool,
     config: &Config,
 ) -> Result<()> {
+    const AUTO_SKIP_SEQUENCE: usize = 3;
+
     // Ensure directories exist
     let wal_dir = data_dir.join("wal");
     std::fs::create_dir_all(&wal_dir)?;
@@ -99,15 +114,17 @@ fn cmd_now(
     let recent_sessions = load_recent_sessions(&wal_path, &csv_path, 7)?;
 
     // Parse category if provided
-    let target_category = category.as_ref().and_then(|c| match c.to_lowercase().as_str() {
-        "vo2" => Some(MicrodoseCategory::Vo2),
-        "gtg" => Some(MicrodoseCategory::Gtg),
-        "mobility" => Some(MicrodoseCategory::Mobility),
-        _ => {
-            eprintln!("Unknown category: {}. Using default selection.", c);
-            None
-        }
-    });
+    let target_category = category
+        .as_ref()
+        .and_then(|c| match c.to_lowercase().as_str() {
+            "vo2" => Some(MicrodoseCategory::Vo2),
+            "gtg" => Some(MicrodoseCategory::Gtg),
+            "mobility" => Some(MicrodoseCategory::Mobility),
+            _ => {
+                eprintln!("Unknown category: {}. Using default selection.", c);
+                None
+            }
+        });
 
     // Build user context (mutable for skip logic)
     let mut recent_sessions = recent_sessions;
@@ -121,6 +138,7 @@ fn cmd_now(
 
     // Prescription loop - allows skip to re-prescribe
     let mut skipped_ids = std::collections::HashSet::new();
+    let mut auto_skip_count = 0;
 
     loop {
         // Update context with current sessions (may include fake skipped ones)
@@ -148,6 +166,13 @@ fn cmd_now(
         // Wait for user action (unless auto-complete)
         let action = if auto_complete {
             UserAction::Done
+        } else if auto_complete_skip {
+            if auto_skip_count < AUTO_SKIP_SEQUENCE {
+                auto_skip_count += 1;
+                UserAction::Skip
+            } else {
+                UserAction::Done
+            }
         } else {
             prompt_user_action()?
         };
@@ -171,31 +196,46 @@ fn cmd_now(
             }
 
             UserAction::Done => {
-            // Create real session
-            let session = MicrodoseSession {
-                id: uuid::Uuid::new_v4(),
-                definition_id: prescription.definition.id.clone(),
-                performed_at: ctx.now,
-                started_at: Some(ctx.now),
-                completed_at: Some(ctx.now),
-                actual_duration_seconds: Some(prescription.definition.suggested_duration_seconds),
-                metrics_realized: vec![], // Could capture actual reps here
-                perceived_rpe: None,
-                avg_hr: None,
-                max_hr: None,
-            };
+                // Create real session
+                let session = MicrodoseSession {
+                    id: uuid::Uuid::new_v4(),
+                    definition_id: prescription.definition.id.clone(),
+                    performed_at: ctx.now,
+                    started_at: Some(ctx.now),
+                    completed_at: Some(ctx.now),
+                    actual_duration_seconds: Some(
+                        prescription.definition.suggested_duration_seconds,
+                    ),
+                    metrics_realized: vec![], // Could capture actual reps here
+                    perceived_rpe: None,
+                    avg_hr: None,
+                    max_hr: None,
+                };
 
-            // Append to WAL (only Real sessions can reach here)
-            let mut sink = JsonlSink::new(&wal_path);
-            sink.append(&session)?;
+                // Append to WAL (only Real sessions can reach here)
+                let mut sink = JsonlSink::new(&wal_path);
+                sink.append(&session)?;
 
-            // Update mobility round-robin if applicable
-            if prescription.definition.category == MicrodoseCategory::Mobility {
-                user_state.last_mobility_def_id = Some(prescription.definition.id.clone());
+                // Ensure base progression state exists for this definition
+                user_state
+                    .progressions
+                    .entry(prescription.definition.id.clone())
+                    .or_insert_with(|| ProgressionState {
+                        reps: prescription.reps.unwrap_or(0),
+                        style: prescription.style.clone().unwrap_or(MovementStyle::None),
+                        level: 0,
+                        last_upgraded: None,
+                    });
+
+                // Update mobility round-robin if applicable
+                if prescription.definition.category == MicrodoseCategory::Mobility {
+                    user_state.last_mobility_def_id = Some(prescription.definition.id.clone());
+                }
+
+                // Persist updated state for all real sessions
                 user_state.save(&state_path)?;
-            }
 
-            println!("\n✓ Session logged!");
+                println!("\n✓ Session logged!");
                 break; // Exit loop
             }
 
@@ -205,8 +245,14 @@ fn cmd_now(
                 user_state.save(&state_path)?;
 
                 println!("\n✓ Intensity increased for next time!");
-                println!("  Level: {}", user_state.progressions[&prescription.definition.id].level);
-                println!("  Reps: {}", user_state.progressions[&prescription.definition.id].reps);
+                println!(
+                    "  Level: {}",
+                    user_state.progressions[&prescription.definition.id].level
+                );
+                println!(
+                    "  Reps: {}",
+                    user_state.progressions[&prescription.definition.id].reps
+                );
                 break; // Exit loop
             }
         }
@@ -246,14 +292,14 @@ fn display_prescription(prescription: &PrescribedMicrodose) {
     println!("╰─────────────────────────────────────────╯");
     println!();
     println!("  {}", prescription.definition.name);
-    println!("  Duration: ~{} seconds ({} min)",
+    println!(
+        "  Duration: ~{} seconds ({} min)",
         prescription.definition.suggested_duration_seconds,
-        prescription.definition.suggested_duration_seconds / 60);
+        prescription.definition.suggested_duration_seconds / 60
+    );
     println!();
 
-    for block in &prescription.definition.blocks {
-        let movement = prescription.definition.name.clone(); // Simplified
-
+    for _ in &prescription.definition.blocks {
         if let Some(reps) = prescription.reps {
             println!("  → {} reps", reps);
         }

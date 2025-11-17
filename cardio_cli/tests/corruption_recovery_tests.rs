@@ -7,13 +7,12 @@
 //! - Partial writes
 
 use assert_cmd::Command;
-use predicates::prelude::*;
 use std::fs;
 use std::io::Write as IoWrite;
 use tempfile::TempDir;
 
 fn cli() -> Command {
-    Command::cargo_bin("cardio_cli").expect("Failed to find cardio_cli binary")
+    Command::new(assert_cmd::cargo::cargo_bin!("krep"))
 }
 
 fn setup_test_dir() -> TempDir {
@@ -32,16 +31,13 @@ fn test_corrupted_state_file() {
     let state_path = data_dir.join("wal/state.json");
     fs::write(&state_path, "{ invalid json }}}}").expect("Failed to write corrupted state");
 
-    // TODO: Improve error handling - should auto-recover by loading defaults
-    // Current behavior: fails with error message suggesting manual deletion
     cli()
         .arg("now")
         .arg("--data-dir")
         .arg(&data_dir)
         .arg("--auto-complete")
         .assert()
-        .failure()
-        .stderr(predicate::str::contains("Corrupted state file"));
+        .success();
 }
 
 #[test]
@@ -54,14 +50,15 @@ fn test_corrupted_wal_file_ignored_during_read() {
 
     // Write corrupted WAL file (invalid JSON lines)
     let wal_path = data_dir.join("wal/microdose_sessions.wal");
-    fs::write(&wal_path, "{ invalid json }\n{ more invalid }").expect("Failed to write corrupted WAL");
+    fs::write(&wal_path, "{ invalid json }\n{ more invalid }")
+        .expect("Failed to write corrupted WAL");
 
     // CLI can still prescribe (corrupted lines are logged as warnings)
     cli()
         .arg("now")
         .arg("--data-dir")
         .arg(&data_dir)
-        .arg("--dry-run")  // Don't write, just test reading
+        .arg("--dry-run") // Don't write, just test reading
         .assert()
         .success();
 }
@@ -77,7 +74,11 @@ fn test_partial_wal_line() {
 
     let mut file = fs::File::create(&wal_path).unwrap();
     // Write valid line
-    writeln!(file, r#"{{"id":"00000000-0000-0000-0000-000000000000","definition_id":"test"}}"#).unwrap();
+    writeln!(
+        file,
+        r#"{{"id":"00000000-0000-0000-0000-000000000000","definition_id":"test"}}"#
+    )
+    .unwrap();
     // Write partial line (no newline)
     write!(file, r#"{{"id":"partial"#).unwrap();
     drop(file);
@@ -119,15 +120,13 @@ fn test_corrupted_strength_signal() {
     let signal_path = strength_dir.join("signal.json");
     fs::write(&signal_path, "{ not valid json at all }").expect("Failed to write corrupted signal");
 
-    // TODO: Should continue without strength signal instead of failing
-    // Current behavior: fails on corrupted strength signal
     cli()
         .arg("now")
         .arg("--data-dir")
         .arg(&data_dir)
         .arg("--auto-complete")
         .assert()
-        .failure();
+        .success();
 }
 
 #[test]
@@ -185,7 +184,7 @@ fn test_state_manual_recovery() {
     let state_path = data_dir.join("wal/state.json");
     fs::write(&state_path, "corrupted").unwrap();
 
-    // First run fails due to corrupted state
+    // Runs should recover and proceed with defaults even when state is invalid
     cli()
         .arg("now")
         .arg("--data-dir")
@@ -194,12 +193,9 @@ fn test_state_manual_recovery() {
         .arg("mobility")
         .arg("--auto-complete")
         .assert()
-        .failure();
+        .success();
 
-    // User manually deletes corrupted state
-    fs::remove_file(&state_path).unwrap();
-
-    // Second run works (creates fresh state)
+    // Second run should still succeed (no manual recovery necessary)
     cli()
         .arg("now")
         .arg("--data-dir")
@@ -239,12 +235,13 @@ fn test_permission_denied_state() {
         fs::set_permissions(&state_path, perms).unwrap();
 
         // CLI should handle permission error gracefully
-        let result = cli()
+        cli()
             .arg("now")
             .arg("--data-dir")
             .arg(&data_dir)
             .arg("--dry-run")
-            .assert();
+            .assert()
+            .success();
 
         // Should fail or warn about permissions
         // (exact behavior depends on error handling strategy)

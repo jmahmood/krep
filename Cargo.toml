@@ -38,8 +38,8 @@ gtk4 = { version = "0.9", package = "gtk4" }
 libadwaita = { version = "0.7", package = "libadwaita" }
 gio = "0.20"
 glib = "0.20"
-libayatana-appindicator = "0.1"
 open = "5"
+ksni = "0.2"
 
 # Testing
 tempfile = "3.12"

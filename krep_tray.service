@@ -1,0 +1,9 @@
+[Unit]
+Description=Krep Tray App
+
+[Service]
+ExecStart=%h/.cargo/bin/krep-tray
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

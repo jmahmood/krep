@@ -25,8 +25,29 @@ pub fn load_external_strength(path: &Path) -> Result<Option<ExternalStrengthSign
         return Ok(None);
     }
 
-    let contents = std::fs::read_to_string(path)?;
-    let file: StrengthSignalFile = serde_json::from_str(&contents)?;
+    let contents = match std::fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(e) => {
+            tracing::warn!(
+                "Failed to read strength signal at {:?}: {}. Ignoring signal.",
+                path,
+                e
+            );
+            return Ok(None);
+        }
+    };
+
+    let file: StrengthSignalFile = match serde_json::from_str(&contents) {
+        Ok(file) => file,
+        Err(e) => {
+            tracing::warn!(
+                "Failed to parse strength signal at {:?}: {}. Ignoring signal.",
+                path,
+                e
+            );
+            return Ok(None);
+        }
+    };
 
     let session_type = parse_session_type(&file.session_type);
 
@@ -86,22 +107,10 @@ mod tests {
 
     #[test]
     fn test_parse_session_types() {
-        assert_eq!(
-            parse_session_type("lower"),
-            StrengthSessionType::Lower
-        );
-        assert_eq!(
-            parse_session_type("UPPER"),
-            StrengthSessionType::Upper
-        );
-        assert_eq!(
-            parse_session_type("full"),
-            StrengthSessionType::Full
-        );
-        assert_eq!(
-            parse_session_type("full_body"),
-            StrengthSessionType::Full
-        );
+        assert_eq!(parse_session_type("lower"), StrengthSessionType::Lower);
+        assert_eq!(parse_session_type("UPPER"), StrengthSessionType::Upper);
+        assert_eq!(parse_session_type("full"), StrengthSessionType::Full);
+        assert_eq!(parse_session_type("full_body"), StrengthSessionType::Full);
 
         match parse_session_type("custom_session") {
             StrengthSessionType::Other(s) => assert_eq!(s, "custom_session"),
@@ -117,7 +126,7 @@ mod tests {
         std::fs::write(&signal_path, "{ invalid json }").unwrap();
 
         let result = load_external_strength(&signal_path);
-        assert!(result.is_err());
+        assert!(result.unwrap().is_none());
     }
 
     #[test]
@@ -132,9 +141,7 @@ mod tests {
 
         std::fs::write(&signal_path, json).unwrap();
 
-        let signal = load_external_strength(&signal_path)
-            .unwrap()
-            .unwrap();
+        let signal = load_external_strength(&signal_path).unwrap().unwrap();
         assert_eq!(signal.session_type, StrengthSessionType::Upper);
     }
 }

@@ -203,12 +203,8 @@ mod tests {
         crate::csv_rollup::wal_to_csv_and_archive(&wal_path, &csv_path).unwrap();
 
         // Load - should get only 1 session despite it being in CSV
-        let sessions = load_recent_sessions(
-            &temp_dir.path().join("nonexistent.wal"),
-            &csv_path,
-            7,
-        )
-        .unwrap();
+        let sessions =
+            load_recent_sessions(&temp_dir.path().join("nonexistent.wal"), &csv_path, 7).unwrap();
 
         // Find the session
         let found = sessions.iter().find(|s| {

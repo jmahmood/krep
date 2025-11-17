@@ -9,7 +9,6 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
-use std::path::PathBuf;
 use tempfile::TempDir;
 
 /// Helper to create a test data directory
@@ -19,7 +18,7 @@ fn setup_test_dir() -> TempDir {
 
 /// Helper to get the path to the CLI binary
 fn cli() -> Command {
-    Command::cargo_bin("cardio_cli").expect("Failed to find cardio_cli binary")
+    Command::new(assert_cmd::cargo::cargo_bin!("krep"))
 }
 
 #[test]
@@ -28,7 +27,9 @@ fn test_cli_help() {
         .arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains("Cardio microdose prescription system"));
+        .stdout(predicate::str::contains(
+            "Cardio microdose prescription system",
+        ));
 }
 
 #[test]
@@ -172,11 +173,7 @@ fn test_rollup_with_cleanup() {
     let entries: Vec<_> = fs::read_dir(&wal_dir)
         .unwrap()
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.file_name()
-                .to_string_lossy()
-                .ends_with(".wal.processed")
-        })
+        .filter(|e| e.file_name().to_string_lossy().ends_with(".wal.processed"))
         .collect();
 
     assert_eq!(entries.len(), 0);

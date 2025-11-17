@@ -55,7 +55,7 @@ Krep intelligently prescribes 30-second to 5-minute cardio sessions based on:
 ### Prerequisites
 
 - Rust 1.70+ (`rustup install stable`)
-- For tray app (optional): GTK4, libadwaita, libayatana-appindicator
+- For tray app (optional): GTK4, libadwaita
 
 ### Build
 

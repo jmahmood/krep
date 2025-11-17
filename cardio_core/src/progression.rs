@@ -14,10 +14,7 @@ use chrono::Utc;
 /// 1. Increase reps until ceiling (default 10)
 /// 2. Then upgrade style and reset reps
 /// 3. Style progression: 4-count → 6-count → 6-count-2-pump → seal
-pub fn upgrade_burpee(
-    state: &mut ProgressionState,
-    rep_ceiling: i32,
-) {
+pub fn upgrade_burpee(state: &mut ProgressionState, rep_ceiling: i32) {
     // If we haven't hit the ceiling, just increment reps
     if state.reps < rep_ceiling {
         state.reps += 1;
@@ -67,11 +64,7 @@ pub fn upgrade_burpee(
 /// Upgrade KB swing intensity (simple linear progression)
 ///
 /// Progression: base_reps + level, capped at max_reps
-pub fn upgrade_kb_swing(
-    state: &mut ProgressionState,
-    base_reps: i32,
-    max_reps: i32,
-) {
+pub fn upgrade_kb_swing(state: &mut ProgressionState, base_reps: i32, max_reps: i32) {
     if state.reps < max_reps {
         state.reps = (base_reps + state.level as i32 + 1).min(max_reps);
         state.level += 1;
@@ -86,10 +79,7 @@ pub fn upgrade_kb_swing(
 ///
 /// Progression: Increase reps up to a ceiling
 /// Band selection is manual (user decides when to reduce assistance)
-pub fn upgrade_pullup(
-    state: &mut ProgressionState,
-    max_reps: i32,
-) {
+pub fn upgrade_pullup(state: &mut ProgressionState, max_reps: i32) {
     if state.reps < max_reps {
         state.reps += 1;
         state.level += 1;
@@ -103,13 +93,11 @@ pub fn upgrade_pullup(
 /// Upgrade intensity for a specific microdose definition
 ///
 /// This is the main entry point for progression upgrades.
-pub fn increase_intensity(
-    def_id: &str,
-    user_state: &mut UserMicrodoseState,
-    config: &Config,
-) {
+pub fn increase_intensity(def_id: &str, user_state: &mut UserMicrodoseState, config: &Config) {
     // Get or create progression state
-    let state = user_state.progressions.entry(def_id.to_string())
+    let state = user_state
+        .progressions
+        .entry(def_id.to_string())
         .or_insert_with(|| {
             // Initialize based on definition type
             let (reps, style) = match def_id {
@@ -143,8 +131,12 @@ pub fn increase_intensity(
         }
     }
 
-    tracing::info!("Increased intensity for {}: level {}, {} reps",
-        def_id, state.level, state.reps);
+    tracing::info!(
+        "Increased intensity for {}: level {}, {} reps",
+        def_id,
+        state.level,
+        state.reps
+    );
 }
 
 #[cfg(test)]
